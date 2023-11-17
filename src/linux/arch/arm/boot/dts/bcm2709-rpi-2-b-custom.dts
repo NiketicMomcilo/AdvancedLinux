@@ -18,6 +18,12 @@
 &i2c1 {
 	clock-frequency = <100000>;
 	status = "okay";
+
+	nunchuk: nunchuk@52{
+		compatible = "nintendo,nunchuk";
+		reg = <0x52>;
+		status = "okay";
+	};
 };
 
 
