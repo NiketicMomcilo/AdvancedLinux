@@ -11,11 +11,20 @@
 	model = "Raspberry Pi 2 Model B";
 };
 
+&gpio {
+	i2c1_pins: i2c1 {
+		brcm,pins = <2 3>;   /* GPIO2 & GPIO3 */
+		brcm,function = <4>; /* alt0 */
+	};
+};
+
 &uart0 {
 	status = "okay";
 };
 
 &i2c1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c1_pins>;
 	clock-frequency = <100000>;
 	status = "okay";
 
