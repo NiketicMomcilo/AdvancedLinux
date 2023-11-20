@@ -12,14 +12,12 @@
 #define BIT6	0x00000040
 #define BIT7	0x00000080
 
-static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *id_table)
+static int nunchuk_init(struct i2c_client *client)
 {
-	char buf[10] = { 0x0 };
+	char buf[2] = { 0x0 };
 	int status = 0;
-	int zpressed = 0;
-	int cpressed = 0;
 
-	pr_info("nunchuk_probe()\n");
+	pr_info("nunchuk_init()\n");
 
 	do {
 		// init nunchuk
@@ -40,9 +38,29 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 			break;
 		else
 			status = 0;
-		mdelay(10);
+
+	} while(0);
+
+	return status;
+}
+
+
+static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *id_table)
+{
+	char buf[10] = { 0x0 };
+	int status = 0;
+	int zpressed = 0;
+	int cpressed = 0;
+
+	pr_info("nunchuk_probe()\n");
+
+	do {
+		// init nunchuk10
+		status = nunchuk_init(client);
 
 		// read nunchuk register
+
+		mdelay(10);
 
 		buf[0] = 0x0;
 		buf[1] = 0x0;
@@ -53,11 +71,13 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 			status = 0;
 		mdelay(10);
 
+
 		status = i2c_master_recv(client, buf, 6);
 		if (status < 0)
 			break;
 		else
 			status = 0;
+
 		mdelay(10);
 
 		// TODO: Remove - BEGIN (not needed for polling)
