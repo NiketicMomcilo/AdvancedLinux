@@ -16,19 +16,32 @@ static int nunchuk_remove(struct i2c_client *client)
 	return 0;
 }
 
-static struct of_device_id nunchuk_dt_match[] = {
-        { .compatible = "nintendo,nunchuk" },
-        { },
+
+static const struct i2c_device_id nunchuk_id[] = {
+	{ "nunchuk", 0 },
+	{ },
 };
+MODULE_DEVICE_TABLE(i2c, nunchuk_id);
+
+#ifdef CONFIG_OF
+
+static const struct of_device_id nunchuk_dt_ids[] = {
+	{ .compatible = "nintendo,nunchuk" },
+	{ },
+};
+MODULE_DEVICE_TABLE(of, nunchuk_dt_ids);
+
+#endif
 
 static struct i2c_driver nunchuk_driver = {
-        .driver = {
-                .name = "nunchuk",
-                .owner = THIS_MODULE,
-                .of_match_table = of_match_ptr(nunchuk_dt_match),
-        },
-        .probe = nunchuk_probe,
-        .remove = nunchuk_remove,
+	.id_table = nunchuk_id,
+	.driver = {
+		.name = "nunchuk",
+		.owner = THIS_MODULE,
+		.of_match_table = of_match_ptr(nunchuk_dt_ids),
+	},
+	.probe = nunchuk_probe,
+	.remove = nunchuk_remove,
 };
 
 module_i2c_driver(nunchuk_driver);
