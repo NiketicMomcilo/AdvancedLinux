@@ -14,7 +14,7 @@
 
 static int nunchuck_init(struct i2c_client *client)
 {
-	char buf[8] = { 0x0 };
+	char buf[2] = { 0x0 };
 	int status = 0;
 
 	pr_info("nunchuk_init()\n");
@@ -38,25 +38,6 @@ static int nunchuck_init(struct i2c_client *client)
 			break;
 		else
 			status = 0;
-		mdelay(10);
-
-		// read nunchuk register
-
-		buf[0] = 0x0;
-		buf[1] = 0x0;
-		status = i2c_master_send(client, buf, 1);
-		if (status < 0)
-			break;
-		else
-			status = 0;
-		mdelay(10);
-
-		status = i2c_master_recv(client, buf, 6);
-		if (status < 0)
-			break;
-		else
-			status = 0;
-		mdelay(10);
 
 	} while(0);
 
@@ -76,6 +57,28 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 	do {
 		// init nunchuk10
 		status = nunchuck_init(client);
+
+		// read nunchuk register
+
+		mdelay(10);
+
+		buf[0] = 0x0;
+		buf[1] = 0x0;
+		status = i2c_master_send(client, buf, 1);
+		if (status < 0)
+			break;
+		else
+			status = 0;
+		mdelay(10);
+
+
+		status = i2c_master_recv(client, buf, 6);
+		if (status < 0)
+			break;
+		else
+			status = 0;
+
+		mdelay(10);
 
 		// TODO: Remove - BEGIN (not needed for polling)
 
