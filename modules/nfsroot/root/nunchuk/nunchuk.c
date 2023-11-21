@@ -86,7 +86,7 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 	struct input_dev *input = NULL;
 	struct nunchuk_dev *nunchuk = NULL;
 
-	polled_input = input_allocate_polled_device();
+	polled_input = devm_input_allocate_polled_device(&client->dev);
 	if (polled_input == NULL) {
 		dev_err(&client->dev, "Failed to allocate polled device.\n");
 		status = -ENOMEM;
@@ -160,7 +160,6 @@ static int nunchuk_remove(struct i2c_client *client)
 	}
 
 	input_unregister_polled_device(nunchuk->polled_input);
-	input_free_polled_device(nunchuk->polled_input);
 
 	return status;
 
