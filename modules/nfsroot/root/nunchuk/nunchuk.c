@@ -22,12 +22,10 @@ struct nunchuk_dev {
 	struct i2c_client *i2c_client;
 };
 
-static int nunchuk_init(struct i2c_client *client)
+static int nunchuk_i2c_init(struct i2c_client *client)
 {
 	int status = 0;
 	char buf[NUNCHUK_I2C_BUFFER_SIZE] = { 0x0 };
-
-	pr_info("nunchuk_init()\n");
 
 	do {
 		// init nunchuk
@@ -60,8 +58,6 @@ static void nunchuk_poll(struct input_polled_dev *polled_input)
 	char buf[NUNCHUK_I2C_BUFFER_SIZE] = { 0x0 };
 	int zpressed = 0;
 	int cpressed = 0;
-	static int zpressed_prev = 0; // TODO: Remove
-	static int cpressed_prev = 0; // TODO: Remove
 
 	struct nunchuk_dev *nunchuk = polled_input->private;
 
@@ -78,23 +74,6 @@ static void nunchuk_poll(struct input_polled_dev *polled_input)
 	zpressed = ((buf[5] & BIT0) == 0) ? 1 : 0;
 	cpressed = ((buf[5] & BIT1) == 0) ? 1 : 0;
 
-	if (zpressed != zpressed_prev) {
-		if(zpressed == 1)
-			pr_info("Z key is pressed.\n");
-		else
-			pr_info("Z key is NOT pressed.\n");
-	}
-
-	if (cpressed != cpressed_prev) {
-		if(cpressed == 1)
-			pr_info("C key is pressed.\n");
-		else
-			pr_info("C key is NOT pressed.\n");
-	}
-
-	zpressed_prev = zpressed;
-	cpressed_prev = cpressed;
-
 	input_event(polled_input->input, EV_KEY, BTN_Z, zpressed);
 	input_event(polled_input->input, EV_KEY, BTN_C, cpressed);
 	input_sync(polled_input->input);
@@ -107,50 +86,63 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 	struct input_dev *input = NULL;
 	struct nunchuk_dev *nunchuk = NULL;
 
-	pr_info("nunchuk_probe()\n"); // TODO: Remove
+	polled_input = input_allocate_polled_device();
+	if (polled_input == NULL) {
+		dev_err(&client->dev, "Failed to allocate polled device.\n");
+		status = -ENOMEM;
+		goto fail_input_alloc;
+	}
 
-	do {
-		polled_input = input_allocate_polled_device();
-		if (polled_input == NULL) {
-			// TODO: Add error message
-			status = -ENOMEM;
-			break;
-		}
+	nunchuk = devm_kzalloc(&client->dev, sizeof(*nunchuk), GFP_KERNEL);
+	if (nunchuk == NULL) {
+		dev_err(&client->dev, "Failed to allocate memory.\n");
+		input_free_polled_device(polled_input);
+		status = -ENOMEM;
+		goto fail_mem_alloc;
+	}
 
-		nunchuk = devm_kzalloc(&client->dev, sizeof(*nunchuk), GFP_KERNEL);
-		if (nunchuk == NULL) {
-			// TODO: Add error message
-			return -ENOMEM;
-		}
+	nunchuk->i2c_client = client;
+	nunchuk->polled_input = polled_input;
+	polled_input->private = nunchuk;
+	polled_input->poll = nunchuk_poll;
+	polled_input->poll_interval = NUNCHUK_POLL_INTERVAL_MS;
+	i2c_set_clientdata(client, nunchuk);
 
-		nunchuk->i2c_client = client;
-		nunchuk->polled_input = polled_input;
-		polled_input->private = nunchuk;
-		polled_input->poll = nunchuk_poll;
-		polled_input->poll_interval = NUNCHUK_POLL_INTERVAL_MS;
-		i2c_set_clientdata(client, nunchuk);
+	input = polled_input->input;
+	input->dev.parent = &client->dev;
+	input->name = "Wii Nunchuk";
+	input->id.bustype = BUS_I2C;
 
-		input = polled_input->input;
-		input->dev.parent = &client->dev;
-		input->name = "Wii Nunchuk";
-		input->id.bustype = BUS_I2C;
+	set_bit(EV_KEY, input->evbit);
+	set_bit(BTN_C, input->keybit);
+	set_bit(BTN_Z, input->keybit);
 
-		set_bit(EV_KEY, input->evbit);
-		set_bit(BTN_C, input->keybit);
-		set_bit(BTN_Z, input->keybit);
+	status = input_register_polled_device(polled_input);
+	if (status < 0) {
+		dev_err(&client->dev, "Failed to register input polled device.\n");
+		goto fail_input_register;
+	}
 
-		status = input_register_polled_device(polled_input);
-		if (status < 0) {
-			// TODO: Add error message
-			break;
-		}
+	status = nunchuk_i2c_init(client);
+	if (status < 0) {
+		dev_err(&client->dev, "Failed Nunchuk I2C initialization.\n");
+		goto fail_i2c_init;
+	}
 
-		status = nunchuk_init(client);
-		if (status < 0) {
-			// TODO: Add error message
-			break;
-		}
-	} while(0);
+	return status;
+
+
+fail_i2c_init:
+	input_unregister_polled_device(nunchuk->polled_input);
+
+fail_input_register:
+	// NOP
+
+fail_mem_alloc:
+	input_free_polled_device(nunchuk->polled_input);
+
+fail_input_alloc:
+	// NOP
 
 	return status;
 }
@@ -160,20 +152,21 @@ static int nunchuk_remove(struct i2c_client *client)
 	int status = 0;
 	struct nunchuk_dev *nunchuk = NULL;
 
-	pr_info("nunchuk_remove()\n"); // TODO: Remove
-
 	nunchuk = i2c_get_clientdata(client);
+	if (nunchuk == NULL) {
+		dev_err(&client->dev, "Unable to get device data.\n");
+		status = -EBUSY;
+		goto fail_device_data;
+	}
 
-	do {
-		if (nunchuk == NULL) {
-			// TODO: Add error message
-			status = -EBUSY;
-			break;
-		}
+	input_unregister_polled_device(nunchuk->polled_input);
+	input_free_polled_device(nunchuk->polled_input);
 
-		input_unregister_polled_device(nunchuk->polled_input);
-		input_free_polled_device(nunchuk->polled_input);
-	} while(0);
+	return status;
+
+
+fail_device_data:
+	// NOP
 
 	return status;
 }
