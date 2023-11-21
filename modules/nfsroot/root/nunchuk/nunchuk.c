@@ -86,6 +86,12 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 
 		input = polled_input->input;
 		input->dev.parent = &client->dev;
+		input->name = "Wii Nunchuk";
+		input->id.bustype = BUS_I2C;
+
+		set_bit(EV_KEY, input->evbit);
+		set_bit(BTN_C, input->keybit);
+		set_bit(BTN_Z, input->keybit);
 
 		status = input_register_polled_device(polled_input);
 		if (status < 0) {
