@@ -5,6 +5,9 @@
 #include <linux/input.h>
 #include <linux/input-polldev.h>
 
+#define NUNCHUK_I2C_BUFFER_SIZE  (10)
+#define NUNCHUK_POLL_INTERVAL_MS (50)
+
 #define BIT0	0x00000001
 #define BIT1	0x00000002
 #define BIT2	0x00000004
@@ -21,8 +24,8 @@ struct nunchuk_dev {
 
 static int nunchuk_init(struct i2c_client *client)
 {
-	char buf[2] = { 0x0 };
 	int status = 0;
+	char buf[NUNCHUK_I2C_BUFFER_SIZE] = { 0x0 };
 
 	pr_info("nunchuk_init()\n");
 
@@ -52,13 +55,54 @@ static int nunchuk_init(struct i2c_client *client)
 	return status;
 }
 
+static void nunchuk_poll(struct input_polled_dev *polled_input)
+{
+	char buf[NUNCHUK_I2C_BUFFER_SIZE] = { 0x0 };
+	int zpressed = 0;
+	int cpressed = 0;
+	static int zpressed_prev = 0; // TODO: Remove
+	static int cpressed_prev = 0; // TODO: Remove
+
+	struct nunchuk_dev *nunchuk = polled_input->private;
+
+	// read nunchuk register
+
+	buf[0] = 0x0;
+	(void)i2c_master_send(nunchuk->i2c_client, buf, 1);
+	mdelay(10);
+
+	(void)i2c_master_recv(nunchuk->i2c_client, buf, 6);
+	mdelay(10);
+
+
+	zpressed = ((buf[5] & BIT0) == 0) ? 1 : 0;
+	cpressed = ((buf[5] & BIT1) == 0) ? 1 : 0;
+
+	if (zpressed != zpressed_prev) {
+		if(zpressed == 1)
+			pr_info("Z key is pressed.\n");
+		else
+			pr_info("Z key is NOT pressed.\n");
+	}
+
+	if (cpressed != cpressed_prev) {
+		if(cpressed == 1)
+			pr_info("C key is pressed.\n");
+		else
+			pr_info("C key is NOT pressed.\n");
+	}
+
+	zpressed_prev = zpressed;
+	cpressed_prev = cpressed;
+
+	input_event(polled_input->input, EV_KEY, BTN_Z, zpressed);
+	input_event(polled_input->input, EV_KEY, BTN_C, cpressed);
+	input_sync(polled_input->input);
+}
 
 static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *id_table)
 {
-	char buf[10] = { 0x0 };
 	int status = 0;
-	int zpressed = 0;
-	int cpressed = 0;
 	struct input_polled_dev *polled_input = NULL;
 	struct input_dev *input = NULL;
 	struct nunchuk_dev *nunchuk = NULL;
@@ -82,6 +126,8 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 		nunchuk->i2c_client = client;
 		nunchuk->polled_input = polled_input;
 		polled_input->private = nunchuk;
+		polled_input->poll = nunchuk_poll;
+		polled_input->poll_interval = NUNCHUK_POLL_INTERVAL_MS;
 		i2c_set_clientdata(client, nunchuk);
 
 		input = polled_input->input;
@@ -99,63 +145,11 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 			break;
 		}
 
-		// init nunchuk10
 		status = nunchuk_init(client);
 		if (status < 0) {
 			// TODO: Add error message
 			break;
 		}
-
-		// read nunchuk register
-
-		buf[0] = 0x0;
-		buf[1] = 0x0;
-		status = i2c_master_send(client, buf, 1);
-		if (status < 0)
-			break;
-		else
-			status = 0;
-		mdelay(10);
-
-		status = i2c_master_recv(client, buf, 6);
-		if (status < 0)
-			break;
-		else
-			status = 0;
-
-		mdelay(10);
-
-		// TODO: Remove - BEGIN (not needed for polling)
-
-		buf[0] = 0x0;
-		buf[1] = 0x0;
-		status = i2c_master_send(client, buf, 1);
-		if (status < 0)
-			break;
-		else
-			status = 0;
-		mdelay(10);
-
-		status = i2c_master_recv(client, buf, 6);
-		if (status < 0)
-			break;
-		else
-			status = 0;
-		// TODO: Remove - END
-
-		zpressed = ((buf[5] & BIT0) == 0) ? 1 : 0;
-		cpressed = ((buf[5] & BIT1) == 0) ? 1 : 0;
-
-		if(zpressed == 1)
-			pr_info("Z key is pressed.\n");
-		else
-			pr_info("Z key is NOT pressed.\n");
-
-		if(cpressed == 1)
-			pr_info("C key is pressed.\n");
-		else
-			pr_info("C key is NOT pressed.\n");
-
 	} while(0);
 
 	return status;
