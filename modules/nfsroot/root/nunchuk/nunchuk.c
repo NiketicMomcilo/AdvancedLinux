@@ -14,6 +14,11 @@
 #define BIT6	0x00000040
 #define BIT7	0x00000080
 
+struct nunchuk_dev {
+	struct input_polled_dev *polled_input;
+	struct i2c_client *i2c_client;
+};
+
 static int nunchuk_init(struct i2c_client *client)
 {
 	char buf[2] = { 0x0 };
@@ -56,8 +61,9 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 	int cpressed = 0;
 	struct input_polled_dev *polled_input = NULL;
 	struct input_dev *input = NULL;
+	struct nunchuk_dev *nunchuk = NULL;
 
-	pr_info("nunchuk_probe()\n");
+	pr_info("nunchuk_probe()\n"); // TODO: Remove
 
 	do {
 		polled_input = input_allocate_polled_device();
@@ -66,6 +72,20 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 			status = -ENOMEM;
 			break;
 		}
+
+		nunchuk = devm_kzalloc(&client->dev, sizeof(*nunchuk), GFP_KERNEL);
+		if (nunchuk == NULL) {
+			// TODO: Add error message
+			return -ENOMEM;
+		}
+
+		nunchuk->i2c_client = client;
+		nunchuk->polled_input = polled_input;
+		polled_input->private = nunchuk;
+		i2c_set_clientdata(client, nunchuk);
+
+		input = polled_input->input;
+		input->dev.parent = &client->dev;
 
 		status = input_register_polled_device(polled_input);
 		if (status < 0) {
@@ -137,9 +157,25 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 
 static int nunchuk_remove(struct i2c_client *client)
 {
-	pr_info("nunchuk_remove()\n");
+	int status = 0;
+	struct nunchuk_dev *nunchuk = NULL;
 
-	return 0;
+	pr_info("nunchuk_remove()\n"); // TODO: Remove
+
+	nunchuk = i2c_get_clientdata(client);
+
+	do {
+		if (nunchuk == NULL) {
+			// TODO: Add error message
+			status = -EBUSY;
+			break;
+		}
+
+		input_unregister_polled_device(nunchuk->polled_input);
+		input_free_polled_device(nunchuk->polled_input);
+	} while(0);
+
+	return status;
 }
 
 
