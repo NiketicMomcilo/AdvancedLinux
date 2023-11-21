@@ -2,6 +2,8 @@
 #include <linux/module.h>
 #include <linux/i2c.h>
 #include <linux/delay.h>
+#include <linux/input.h>
+#include <linux/input-polldev.h>
 
 #define BIT0	0x00000001
 #define BIT1	0x00000002
@@ -38,6 +40,7 @@ static int nunchuk_init(struct i2c_client *client)
 			break;
 		else
 			status = 0;
+		mdelay(10);
 
 	} while(0);
 
@@ -51,16 +54,33 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 	int status = 0;
 	int zpressed = 0;
 	int cpressed = 0;
+	struct input_polled_dev *polled_input = NULL;
+	struct input_dev *input = NULL;
 
 	pr_info("nunchuk_probe()\n");
 
 	do {
+		polled_input = input_allocate_polled_device();
+		if (polled_input == NULL) {
+			// TODO: Add error message
+			status = -ENOMEM;
+			break;
+		}
+
+		status = input_register_polled_device(polled_input);
+		if (status < 0) {
+			// TODO: Add error message
+			break;
+		}
+
 		// init nunchuk10
 		status = nunchuk_init(client);
+		if (status < 0) {
+			// TODO: Add error message
+			break;
+		}
 
 		// read nunchuk register
-
-		mdelay(10);
 
 		buf[0] = 0x0;
 		buf[1] = 0x0;
@@ -70,7 +90,6 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 		else
 			status = 0;
 		mdelay(10);
-
 
 		status = i2c_master_recv(client, buf, 6);
 		if (status < 0)
