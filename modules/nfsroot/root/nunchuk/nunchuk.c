@@ -8,6 +8,24 @@
 #define NUNCHUK_I2C_BUFFER_SIZE  (10)
 #define NUNCHUK_POLL_INTERVAL_MS (50)
 
+#define NUNCHUK_ACC_NUMBER_OF_AXES		(3)
+#define NUNCHUK_ACC_INDEX_AXIS_X		(2)
+#define NUNCHUK_ACC_INDEX_AXIS_Y		(3)
+#define NUNCHUK_ACC_INDEX_AXIS_Z		(4)
+#define NUNCHUK_ACC_INDEX_BUTTONS		(5)
+
+#define NUNCHUK_ACC_ABSINFO_INDEX_ABS_X	(0)
+#define NUNCHUK_ACC_ABSINFO_INDEX_ABS_Y	(1)
+#define NUNCHUK_ACC_ABSINFO_INDEX_ABS_Z	(2)
+#define NUNCHUK_ACC_ABSINFO_INIT_VALUE	((s8)    0)	// latest reported value for the axis
+#define NUNCHUK_ACC_ABSINFO_MIN			((s8) -128) // specifies minimum value for the axis
+#define NUNCHUK_ACC_ABSINFO_MAX			((s8)  127) // specifies maximum value for the axis
+#define NUNCHUK_ACC_ABSINFO_FUZZ		((s8)   10) // specifies fuzz value that is used to filter noise
+													// from the event stream
+#define NUNCHUK_ACC_ABSINFO_FLAT		((s8)    0) // values that are within this value will be discarded by
+													// joydev interface and reported as 0 instead
+#define NUNCHUK_ACC_ABSINFO_RESOLUTION	((s8)    1) // specifies resolution for the values reported for the axis
+
 #define BIT0	0x00000001
 #define BIT1	0x00000002
 #define BIT2	0x00000004
@@ -55,34 +73,37 @@ static int nunchuk_i2c_init(struct i2c_client *client)
 	return status;
 }
 
+static void nunchuk_i2c_get(struct i2c_client *client, char *buf)
+{
+	char read_cmd = 0x0;
+
+	(void)i2c_master_send(client, &read_cmd, 1);
+	mdelay(10);
+
+	(void)i2c_master_recv(client, buf, 6);
+	mdelay(10);
+}
+
 #if (DEBUG_POLL_FUNCTION == 1)
 
 static void nunchuk_poll_accelerometer(struct input_polled_dev *polled_input)
 {
 	char buf[NUNCHUK_I2C_BUFFER_SIZE] = { 0x0 };
-	u8 acc_x = 0;
-	u8 acc_y = 0;
-	u8 acc_z = 0;
+	s8 acc_x = 0;
+	s8 acc_y = 0;
+	s8 acc_z = 0;
 
 	struct nunchuk_dev *nunchuk = polled_input->private;
 
-	// read nunchuk register
+	nunchuk_i2c_get(nunchuk->i2c_client, buf);
 
-	buf[0] = 0x0;
-	(void)i2c_master_send(nunchuk->i2c_client, buf, 1);
-	mdelay(10);
+	acc_x = buf[NUNCHUK_ACC_INDEX_AXIS_X];
+	acc_y = buf[NUNCHUK_ACC_INDEX_AXIS_Y];
+	acc_z = buf[NUNCHUK_ACC_INDEX_AXIS_Z];
 
-	(void)i2c_master_recv(nunchuk->i2c_client, buf, 6);
-	mdelay(10);
-
-
-	acc_x = buf[2];
-	acc_y = buf[3];
-	acc_z = buf[4];
-
-	input_event(polled_input->input, EV_REL, REL_X, acc_x);
-	input_event(polled_input->input, EV_REL, REL_Y, acc_y);
-	input_event(polled_input->input, EV_REL, REL_Z, acc_z);
+	input_event(polled_input->input, EV_ABS, ABS_X, acc_x);
+	input_event(polled_input->input, EV_ABS, ABS_Y, acc_y);
+	input_event(polled_input->input, EV_ABS, ABS_Z, acc_z);
 	input_sync(polled_input->input);
 }
 
@@ -96,18 +117,10 @@ static void nunchuk_poll_buttons(struct input_polled_dev *polled_input)
 
 	struct nunchuk_dev *nunchuk = polled_input->private;
 
-	// read nunchuk register
+	nunchuk_i2c_get(nunchuk->i2c_client, buf);
 
-	buf[0] = 0x0;
-	(void)i2c_master_send(nunchuk->i2c_client, buf, 1);
-	mdelay(10);
-
-	(void)i2c_master_recv(nunchuk->i2c_client, buf, 6);
-	mdelay(10);
-
-
-	zpressed = ((buf[5] & BIT0) == 0) ? 1 : 0;
-	cpressed = ((buf[5] & BIT1) == 0) ? 1 : 0;
+	zpressed = ((buf[NUNCHUK_ACC_INDEX_BUTTONS] & BIT0) == 0) ? 1 : 0;
+	cpressed = ((buf[NUNCHUK_ACC_INDEX_BUTTONS] & BIT1) == 0) ? 1 : 0;
 
 	input_event(polled_input->input, EV_KEY, BTN_Z, zpressed);
 	input_event(polled_input->input, EV_KEY, BTN_C, cpressed);
@@ -122,6 +135,9 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 	struct input_polled_dev *polled_input = NULL;
 	struct input_dev *input = NULL;
 	struct nunchuk_dev *nunchuk = NULL;
+#if (DEBUG_POLL_FUNCTION == 1)
+	char buf[NUNCHUK_I2C_BUFFER_SIZE] = { 0x0 };
+#endif
 
 	polled_input = devm_input_allocate_polled_device(&client->dev);
 	if (polled_input == NULL) {
@@ -148,16 +164,52 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 	polled_input->poll_interval = NUNCHUK_POLL_INTERVAL_MS;
 	i2c_set_clientdata(client, nunchuk);
 
+	status = nunchuk_i2c_init(client);
+	if (status < 0) {
+		dev_err(&client->dev, "Failed Nunchuk I2C initialization.\n");
+		goto fail_i2c_init;
+	}
+
 	input = polled_input->input;
 	input->dev.parent = &client->dev;
 	input->name = "Wii Nunchuk";
 	input->id.bustype = BUS_I2C;
 
 #if (DEBUG_POLL_FUNCTION == 1)
-	set_bit(EV_REL, input->evbit);
-	set_bit(REL_X, input->relbit);
-	set_bit(REL_Y, input->relbit);
-	set_bit(REL_Z, input->relbit);
+	input->absinfo = devm_kzalloc(&client->dev, (NUNCHUK_ACC_NUMBER_OF_AXES * sizeof(*input->absinfo)), GFP_KERNEL);
+	if (input->absinfo == NULL) {
+		dev_err(&client->dev, "Failed to allocate input absinfo memory.\n");
+		status = -ENOMEM;
+		goto fail_absinfo_alloc;
+	}
+
+	nunchuk_i2c_get(nunchuk->i2c_client, buf);
+
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_X)->value		= buf[NUNCHUK_ACC_INDEX_AXIS_X];
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_X)->minimum		= NUNCHUK_ACC_ABSINFO_MIN;
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_X)->maximum		= NUNCHUK_ACC_ABSINFO_MAX;
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_X)->fuzz		= NUNCHUK_ACC_ABSINFO_FUZZ;
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_X)->flat		= NUNCHUK_ACC_ABSINFO_FLAT;
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_X)->resolution	= NUNCHUK_ACC_ABSINFO_RESOLUTION;
+
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_Y)->value		= buf[NUNCHUK_ACC_INDEX_AXIS_Y];
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_Y)->minimum		= NUNCHUK_ACC_ABSINFO_MIN;
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_Y)->maximum		= NUNCHUK_ACC_ABSINFO_MAX;
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_Y)->fuzz		= NUNCHUK_ACC_ABSINFO_FUZZ;
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_Y)->flat		= NUNCHUK_ACC_ABSINFO_FLAT;
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_Y)->resolution	= NUNCHUK_ACC_ABSINFO_RESOLUTION;
+
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_Z)->value		= buf[NUNCHUK_ACC_INDEX_AXIS_Z];
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_Z)->minimum		= NUNCHUK_ACC_ABSINFO_MIN;
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_Z)->maximum		= NUNCHUK_ACC_ABSINFO_MAX;
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_Z)->fuzz		= NUNCHUK_ACC_ABSINFO_FUZZ;
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_Z)->flat		= NUNCHUK_ACC_ABSINFO_FLAT;
+	(input->absinfo + NUNCHUK_ACC_ABSINFO_INDEX_ABS_Z)->resolution	= NUNCHUK_ACC_ABSINFO_RESOLUTION;
+
+	set_bit(EV_ABS, input->evbit);
+	set_bit(ABS_X, input->absbit);
+	set_bit(ABS_Y, input->absbit);
+	set_bit(ABS_Z, input->absbit);
 #else
 	set_bit(EV_KEY, input->evbit);
 	set_bit(BTN_C, input->keybit);
@@ -170,19 +222,16 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 		goto fail_input_register;
 	}
 
-	status = nunchuk_i2c_init(client);
-	if (status < 0) {
-		dev_err(&client->dev, "Failed Nunchuk I2C initialization.\n");
-		goto fail_i2c_init;
-	}
-
 	return status;
 
 
-fail_i2c_init:
-	input_unregister_polled_device(nunchuk->polled_input);
-
 fail_input_register:
+	// NOP
+
+fail_i2c_init:
+	// NOP
+
+fail_absinfo_alloc:
 	// NOP
 
 fail_mem_alloc:
