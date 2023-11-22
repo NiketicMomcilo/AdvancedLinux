@@ -18,7 +18,6 @@
 #define NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET	((s8) -128)
 #define NUNCHUK_AXES_INDEX_ACC_OFFSET		((s8)    0)
 
-#define NUNCHUK_AXES_ABSINFO_NUMBER_OF_AXES		(5)
 #define NUNCHUK_AXES_ABSINFO_INDEX_ABS_X		(0)
 #define NUNCHUK_AXES_ABSINFO_INDEX_ABS_Y		(1)
 #define NUNCHUK_AXES_ABSINFO_INDEX_ABS_Z		(2)
@@ -195,12 +194,7 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 	input->id.bustype = BUS_I2C;
 
 #if (DEBUG_POLL_FUNCTION == 1)
-	input->absinfo = devm_kzalloc(&client->dev, (NUNCHUK_AXES_ABSINFO_NUMBER_OF_AXES * sizeof(*input->absinfo)), GFP_KERNEL);
-	if (input->absinfo == NULL) {
-		dev_err(&client->dev, "Failed to allocate input absinfo memory.\n");
-		status = -ENOMEM;
-		goto fail_absinfo_alloc;
-	}
+	input_alloc_absinfo(input);
 
 	nunchuk_i2c_get(nunchuk->i2c_client, buf);
 
@@ -264,9 +258,6 @@ fail_input_register:
 	// NOP
 
 fail_i2c_init:
-	// NOP
-
-fail_absinfo_alloc:
 	// NOP
 
 fail_mem_alloc:
