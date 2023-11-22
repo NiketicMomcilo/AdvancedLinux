@@ -16,7 +16,7 @@
 #define NUNCHUK_AXES_INDEX_BUTTONS		(5)
 
 #define NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET	((s8) -128)
-#define NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET	((s8) -128)
+#define NUNCHUK_AXES_INDEX_ACC_OFFSET		((s8)    0)
 
 #define NUNCHUK_AXES_ABSINFO_NUMBER_OF_AXES		(5)
 #define NUNCHUK_AXES_ABSINFO_INDEX_ABS_X		(0)
@@ -89,6 +89,12 @@ static void nunchuk_i2c_get(struct i2c_client *client, char *buf)
 
 	(void)i2c_master_recv(client, buf, 6);
 	mdelay(10);
+
+	buf[NUNCHUK_AXES_INDEX_JOYSTICK_X] += NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
+	buf[NUNCHUK_AXES_INDEX_JOYSTICK_Y] += NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
+	buf[NUNCHUK_AXES_INDEX_ACC_X] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
+	buf[NUNCHUK_AXES_INDEX_ACC_Y] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
+	buf[NUNCHUK_AXES_INDEX_ACC_Z] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
 }
 
 #if (DEBUG_POLL_FUNCTION == 1)
@@ -106,8 +112,8 @@ static void nunchuk_poll_axes(struct input_polled_dev *polled_input)
 
 	nunchuk_i2c_get(nunchuk->i2c_client, buf);
 
-	joystick_x	= buf[NUNCHUK_AXES_INDEX_JOYSTICK_X] + NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
-	joystick_y	= buf[NUNCHUK_AXES_INDEX_JOYSTICK_Y] + NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
+	joystick_x	= buf[NUNCHUK_AXES_INDEX_JOYSTICK_X];
+	joystick_y	= buf[NUNCHUK_AXES_INDEX_JOYSTICK_Y];
 	acc_x		= buf[NUNCHUK_AXES_INDEX_ACC_X];
 	acc_y		= buf[NUNCHUK_AXES_INDEX_ACC_Y];
 	acc_z		= buf[NUNCHUK_AXES_INDEX_ACC_Z];
