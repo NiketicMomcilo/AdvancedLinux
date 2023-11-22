@@ -17,6 +17,8 @@
 #define BIT6	0x00000040
 #define BIT7	0x00000080
 
+#define DEBUG_POLL_FUNCTION (1)
+
 struct nunchuk_dev {
 	struct input_polled_dev *polled_input;
 	struct i2c_client *i2c_client;
@@ -53,7 +55,37 @@ static int nunchuk_i2c_init(struct i2c_client *client)
 	return status;
 }
 
-static void nunchuk_poll(struct input_polled_dev *polled_input)
+#if (DEBUG_POLL_FUNCTION == 1)
+
+static void nunchuk_poll_accelerometer(struct input_polled_dev *polled_input)
+{
+	char buf[NUNCHUK_I2C_BUFFER_SIZE] = { 0x0 };
+	u8 acc_x = 0;
+	u8 acc_y = 0;
+	u8 acc_z = 0;
+
+	struct nunchuk_dev *nunchuk = polled_input->private;
+
+	// read nunchuk register
+
+	buf[0] = 0x0;
+	(void)i2c_master_send(nunchuk->i2c_client, buf, 1);
+	mdelay(10);
+
+	(void)i2c_master_recv(nunchuk->i2c_client, buf, 6);
+	mdelay(10);
+
+
+	acc_x = buf[2];
+	acc_y = buf[3];
+	acc_z = buf[4];
+
+	pr_info("[DEBUG] (x, y, z) = (%u, %u, %u)\n", acc_x, acc_y, acc_z);
+}
+
+#else
+
+static void nunchuk_poll_buttons(struct input_polled_dev *polled_input)
 {
 	char buf[NUNCHUK_I2C_BUFFER_SIZE] = { 0x0 };
 	int zpressed = 0;
@@ -78,6 +110,8 @@ static void nunchuk_poll(struct input_polled_dev *polled_input)
 	input_event(polled_input->input, EV_KEY, BTN_C, cpressed);
 	input_sync(polled_input->input);
 }
+
+#endif
 
 static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *id_table)
 {
@@ -104,7 +138,11 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 	nunchuk->i2c_client = client;
 	nunchuk->polled_input = polled_input;
 	polled_input->private = nunchuk;
-	polled_input->poll = nunchuk_poll;
+#if (DEBUG_POLL_FUNCTION == 1)
+	polled_input->poll = nunchuk_poll_accelerometer;
+#else
+	polled_input->poll = nunchuk_poll_buttons;
+#endif
 	polled_input->poll_interval = NUNCHUK_POLL_INTERVAL_MS;
 	i2c_set_clientdata(client, nunchuk);
 
