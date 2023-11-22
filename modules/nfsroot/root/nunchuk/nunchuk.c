@@ -80,7 +80,10 @@ static void nunchuk_poll_accelerometer(struct input_polled_dev *polled_input)
 	acc_y = buf[3];
 	acc_z = buf[4];
 
-	pr_info("[DEBUG] (x, y, z) = (%u, %u, %u)\n", acc_x, acc_y, acc_z);
+	input_event(polled_input->input, EV_REL, REL_X, acc_x);
+	input_event(polled_input->input, EV_REL, REL_Y, acc_y);
+	input_event(polled_input->input, EV_REL, REL_Z, acc_z);
+	input_sync(polled_input->input);
 }
 
 #else
@@ -129,8 +132,7 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 
 	nunchuk = devm_kzalloc(&client->dev, sizeof(*nunchuk), GFP_KERNEL);
 	if (nunchuk == NULL) {
-		dev_err(&client->dev, "Failed to allocate memory.\n");
-		input_free_polled_device(polled_input);
+		dev_err(&client->dev, "Failed to allocate device memory.\n");
 		status = -ENOMEM;
 		goto fail_mem_alloc;
 	}
@@ -151,9 +153,16 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 	input->name = "Wii Nunchuk";
 	input->id.bustype = BUS_I2C;
 
+#if (DEBUG_POLL_FUNCTION == 1)
+	set_bit(EV_REL, input->evbit);
+	set_bit(REL_X, input->relbit);
+	set_bit(REL_Y, input->relbit);
+	set_bit(REL_Z, input->relbit);
+#else
 	set_bit(EV_KEY, input->evbit);
 	set_bit(BTN_C, input->keybit);
 	set_bit(BTN_Z, input->keybit);
+#endif
 
 	status = input_register_polled_device(polled_input);
 	if (status < 0) {
@@ -177,7 +186,7 @@ fail_input_register:
 	// NOP
 
 fail_mem_alloc:
-	input_free_polled_device(nunchuk->polled_input);
+	// NOP
 
 fail_input_alloc:
 	// NOP
