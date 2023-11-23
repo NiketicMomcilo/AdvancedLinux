@@ -31,6 +31,7 @@
 	nunchuk: nunchuk@52{
 		compatible = "nintendo,nunchuk";
 		reg = <0x52>;
+		mode = <2>;
 		status = "okay";
 	};
 };
