@@ -5,6 +5,9 @@
 #include <linux/input.h>
 #include <linux/input-polldev.h>
 
+#define NUNCHUK_MODE_MIN	(1)
+#define NUNCHUK_MODE_MAX	(2)
+
 #define NUNCHUK_I2C_POLL_SIZE    (6)
 #define NUNCHUK_I2C_BUFFER_SIZE  (NUNCHUK_I2C_POLL_SIZE)
 #define NUNCHUK_POLL_INTERVAL_MS (50)
@@ -173,7 +176,16 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 
 	nunchuk->i2c_client = client;
 	nunchuk->polled_input = polled_input;
-	nunchuk->mode = 2; // TODO: Replace with of_property_read_u32
+	status = of_property_read_u32(client->dev.of_node, "mode", &nunchuk->mode);
+	if (status != 0) {
+		dev_err(&client->dev, "Cannot access mode property.\n");
+		goto fail_dts_property;
+	} else if ((nunchuk->mode < NUNCHUK_MODE_MIN) || (nunchuk->mode > NUNCHUK_MODE_MAX)) {
+		dev_err(&client->dev, "Invalid mode property value.\n");
+		status = -EINVAL;
+		goto fail_dts_property;
+	}
+
 	polled_input->private = nunchuk;
 	polled_input->poll = nunchuk_poll;
 	polled_input->poll_interval = NUNCHUK_POLL_INTERVAL_MS;
@@ -271,6 +283,9 @@ fail_input_register:
 	// NOP
 
 fail_i2c_init:
+	// NOP
+
+fail_dts_property:
 	// NOP
 
 fail_mem_alloc:
