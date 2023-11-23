@@ -5,7 +5,8 @@
 #include <linux/input.h>
 #include <linux/input-polldev.h>
 
-#define NUNCHUK_I2C_BUFFER_SIZE  (10)
+#define NUNCHUK_I2C_POLL_SIZE    (6)
+#define NUNCHUK_I2C_BUFFER_SIZE  (NUNCHUK_I2C_POLL_SIZE)
 #define NUNCHUK_POLL_INTERVAL_MS (50)
 
 #define NUNCHUK_AXES_INDEX_JOYSTICK_X	(0)
@@ -41,11 +42,11 @@
 #define BIT6	0x00000040
 #define BIT7	0x00000080
 
-#define DEBUG_POLL_FUNCTION (1)
-
 struct nunchuk_dev {
 	struct input_polled_dev *polled_input;
 	struct i2c_client *i2c_client;
+	char buf[NUNCHUK_I2C_BUFFER_SIZE];
+	u32 mode;
 };
 
 static int nunchuk_i2c_init(struct i2c_client *client)
@@ -79,73 +80,75 @@ static int nunchuk_i2c_init(struct i2c_client *client)
 	return status;
 }
 
-static void nunchuk_i2c_get(struct i2c_client *client, char *buf)
+static void nunchuk_i2c_get(struct nunchuk_dev *nunchuk)
 {
 	char read_cmd = 0x0;
 
-	(void)i2c_master_send(client, &read_cmd, 1);
+	(void)i2c_master_send(nunchuk->i2c_client, &read_cmd, 1);
 	mdelay(10);
 
-	(void)i2c_master_recv(client, buf, 6);
+	(void)i2c_master_recv(nunchuk->i2c_client, nunchuk->buf, NUNCHUK_I2C_POLL_SIZE);
 	mdelay(10);
 
-	buf[NUNCHUK_AXES_INDEX_JOYSTICK_X] += NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
-	buf[NUNCHUK_AXES_INDEX_JOYSTICK_Y] += NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
-	buf[NUNCHUK_AXES_INDEX_ACC_X] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
-	buf[NUNCHUK_AXES_INDEX_ACC_Y] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
-	buf[NUNCHUK_AXES_INDEX_ACC_Z] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
+	nunchuk->buf[NUNCHUK_AXES_INDEX_JOYSTICK_X] += NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
+	nunchuk->buf[NUNCHUK_AXES_INDEX_JOYSTICK_Y] += NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
+	nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_X] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
+	nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_Y] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
+	nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_Z] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
 }
 
-#if (DEBUG_POLL_FUNCTION == 1)
-
-static void nunchuk_poll_axes(struct input_polled_dev *polled_input)
+static void poll_buttons(struct nunchuk_dev *nunchuk)
 {
-	char buf[NUNCHUK_I2C_BUFFER_SIZE] = { 0x0 };
+	int zpressed = 0;
+	int cpressed = 0;
+
+	zpressed = ((nunchuk->buf[NUNCHUK_AXES_INDEX_BUTTONS] & BIT0) == 0) ? 1 : 0;
+	cpressed = ((nunchuk->buf[NUNCHUK_AXES_INDEX_BUTTONS] & BIT1) == 0) ? 1 : 0;
+
+	input_event(nunchuk->polled_input->input, EV_KEY, BTN_Z, zpressed);
+	input_event(nunchuk->polled_input->input, EV_KEY, BTN_C, cpressed);
+}
+
+static void poll_axes(struct nunchuk_dev *nunchuk)
+{
 	s8 joystick_x = 0;
 	s8 joystick_y = 0;
 	s8 acc_x = 0;
 	s8 acc_y = 0;
 	s8 acc_z = 0;
 
-	struct nunchuk_dev *nunchuk = polled_input->private;
+	joystick_x	= nunchuk->buf[NUNCHUK_AXES_INDEX_JOYSTICK_X];
+	joystick_y	= nunchuk->buf[NUNCHUK_AXES_INDEX_JOYSTICK_Y];
+	acc_x		= nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_X];
+	acc_y		= nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_Y];
+	acc_z		= nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_Z];
 
-	nunchuk_i2c_get(nunchuk->i2c_client, buf);
-
-	joystick_x	= buf[NUNCHUK_AXES_INDEX_JOYSTICK_X];
-	joystick_y	= buf[NUNCHUK_AXES_INDEX_JOYSTICK_Y];
-	acc_x		= buf[NUNCHUK_AXES_INDEX_ACC_X];
-	acc_y		= buf[NUNCHUK_AXES_INDEX_ACC_Y];
-	acc_z		= buf[NUNCHUK_AXES_INDEX_ACC_Z];
-
-	input_event(polled_input->input, EV_ABS, ABS_RX, joystick_x);
-	input_event(polled_input->input, EV_ABS, ABS_RY, joystick_y);
-	input_event(polled_input->input, EV_ABS, ABS_X, acc_x);
-	input_event(polled_input->input, EV_ABS, ABS_Y, acc_y);
-	input_event(polled_input->input, EV_ABS, ABS_Z, acc_z);
-	input_sync(polled_input->input);
+	input_event(nunchuk->polled_input->input, EV_ABS, ABS_RX, joystick_x);
+	input_event(nunchuk->polled_input->input, EV_ABS, ABS_RY, joystick_y);
+	input_event(nunchuk->polled_input->input, EV_ABS, ABS_X, acc_x);
+	input_event(nunchuk->polled_input->input, EV_ABS, ABS_Y, acc_y);
+	input_event(nunchuk->polled_input->input, EV_ABS, ABS_Z, acc_z);
 }
 
-#else
-
-static void nunchuk_poll_buttons(struct input_polled_dev *polled_input)
+static void nunchuk_poll(struct input_polled_dev *polled_input)
 {
-	char buf[NUNCHUK_I2C_BUFFER_SIZE] = { 0x0 };
-	int zpressed = 0;
-	int cpressed = 0;
-
 	struct nunchuk_dev *nunchuk = polled_input->private;
 
-	nunchuk_i2c_get(nunchuk->i2c_client, buf);
+	nunchuk_i2c_get(nunchuk);
 
-	zpressed = ((buf[NUNCHUK_AXES_INDEX_BUTTONS] & BIT0) == 0) ? 1 : 0;
-	cpressed = ((buf[NUNCHUK_AXES_INDEX_BUTTONS] & BIT1) == 0) ? 1 : 0;
+	switch(nunchuk->mode) {
+	case 1:
+		poll_buttons(nunchuk);
+		break;
+	case 2:
+	default:
+		poll_buttons(nunchuk);
+		poll_axes(nunchuk);
+		break;
+	}
 
-	input_event(polled_input->input, EV_KEY, BTN_Z, zpressed);
-	input_event(polled_input->input, EV_KEY, BTN_C, cpressed);
 	input_sync(polled_input->input);
 }
-
-#endif
 
 static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *id_table)
 {
@@ -153,9 +156,6 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 	struct input_polled_dev *polled_input = NULL;
 	struct input_dev *input = NULL;
 	struct nunchuk_dev *nunchuk = NULL;
-#if (DEBUG_POLL_FUNCTION == 1)
-	char buf[NUNCHUK_I2C_BUFFER_SIZE] = { 0x0 };
-#endif
 
 	polled_input = devm_input_allocate_polled_device(&client->dev);
 	if (polled_input == NULL) {
@@ -173,12 +173,9 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 
 	nunchuk->i2c_client = client;
 	nunchuk->polled_input = polled_input;
+	nunchuk->mode = 2; // TODO: Replace with of_property_read_u32
 	polled_input->private = nunchuk;
-#if (DEBUG_POLL_FUNCTION == 1)
-	polled_input->poll = nunchuk_poll_axes;
-#else
-	polled_input->poll = nunchuk_poll_buttons;
-#endif
+	polled_input->poll = nunchuk_poll;
 	polled_input->poll_interval = NUNCHUK_POLL_INTERVAL_MS;
 	i2c_set_clientdata(client, nunchuk);
 
@@ -193,57 +190,73 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 	input->name = "Wii Nunchuk";
 	input->id.bustype = BUS_I2C;
 
-#if (DEBUG_POLL_FUNCTION == 1)
-	input_alloc_absinfo(input);
+	switch(nunchuk->mode) {
+	case 1:
 
-	nunchuk_i2c_get(nunchuk->i2c_client, buf);
+		// Button events
+		set_bit(EV_KEY, input->evbit);
+		set_bit(BTN_C, input->keybit);
+		set_bit(BTN_Z, input->keybit);
 
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_X)->value		= buf[NUNCHUK_AXES_INDEX_ACC_X];
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_X)->minimum	= NUNCHUK_AXES_ABSINFO_MIN;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_X)->maximum	= NUNCHUK_AXES_ABSINFO_MAX;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_X)->fuzz		= NUNCHUK_AXES_ABSINFO_FUZZ;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_X)->flat		= NUNCHUK_AXES_ABSINFO_FLAT;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_X)->resolution	= NUNCHUK_AXES_ABSINFO_RESOLUTION;
+		break;
 
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Y)->value		= buf[NUNCHUK_AXES_INDEX_ACC_Y];
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Y)->minimum	= NUNCHUK_AXES_ABSINFO_MIN;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Y)->maximum	= NUNCHUK_AXES_ABSINFO_MAX;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Y)->fuzz		= NUNCHUK_AXES_ABSINFO_FUZZ;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Y)->flat		= NUNCHUK_AXES_ABSINFO_FLAT;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Y)->resolution	= NUNCHUK_AXES_ABSINFO_RESOLUTION;
+	case 2:
+	default:
 
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Z)->value		= buf[NUNCHUK_AXES_INDEX_ACC_Z];
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Z)->minimum	= NUNCHUK_AXES_ABSINFO_MIN;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Z)->maximum	= NUNCHUK_AXES_ABSINFO_MAX;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Z)->fuzz		= NUNCHUK_AXES_ABSINFO_FUZZ;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Z)->flat		= NUNCHUK_AXES_ABSINFO_FLAT;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Z)->resolution	= NUNCHUK_AXES_ABSINFO_RESOLUTION;
+		// Button events
+		set_bit(EV_KEY, input->evbit);
+		set_bit(BTN_C, input->keybit);
+		set_bit(BTN_Z, input->keybit);
 
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RX)->value			= buf[NUNCHUK_AXES_INDEX_JOYSTICK_X];
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RX)->minimum		= NUNCHUK_AXES_ABSINFO_MIN;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RX)->maximum		= NUNCHUK_AXES_ABSINFO_MAX;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RX)->fuzz			= NUNCHUK_AXES_ABSINFO_FUZZ;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RX)->flat			= NUNCHUK_AXES_ABSINFO_FLAT;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RX)->resolution	= NUNCHUK_AXES_ABSINFO_RESOLUTION;
+		// Axis events
+		input_alloc_absinfo(input);
 
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RY)->value			= buf[NUNCHUK_AXES_INDEX_JOYSTICK_Y];
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RY)->minimum		= NUNCHUK_AXES_ABSINFO_MIN;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RY)->maximum		= NUNCHUK_AXES_ABSINFO_MAX;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RY)->fuzz			= NUNCHUK_AXES_ABSINFO_FUZZ;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RY)->flat			= NUNCHUK_AXES_ABSINFO_FLAT;
-	(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RY)->resolution	= NUNCHUK_AXES_ABSINFO_RESOLUTION;
+		nunchuk_i2c_get(nunchuk);
 
-	set_bit(EV_ABS, input->evbit);
-	set_bit(ABS_X, input->absbit);
-	set_bit(ABS_Y, input->absbit);
-	set_bit(ABS_Z, input->absbit);
-	set_bit(ABS_RX, input->absbit);
-	set_bit(ABS_RY, input->absbit);
-#else
-	set_bit(EV_KEY, input->evbit);
-	set_bit(BTN_C, input->keybit);
-	set_bit(BTN_Z, input->keybit);
-#endif
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_X)->value		= nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_X];
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_X)->minimum	= NUNCHUK_AXES_ABSINFO_MIN;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_X)->maximum	= NUNCHUK_AXES_ABSINFO_MAX;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_X)->fuzz		= NUNCHUK_AXES_ABSINFO_FUZZ;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_X)->flat		= NUNCHUK_AXES_ABSINFO_FLAT;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_X)->resolution	= NUNCHUK_AXES_ABSINFO_RESOLUTION;
+
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Y)->value		= nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_Y];
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Y)->minimum	= NUNCHUK_AXES_ABSINFO_MIN;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Y)->maximum	= NUNCHUK_AXES_ABSINFO_MAX;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Y)->fuzz		= NUNCHUK_AXES_ABSINFO_FUZZ;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Y)->flat		= NUNCHUK_AXES_ABSINFO_FLAT;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Y)->resolution	= NUNCHUK_AXES_ABSINFO_RESOLUTION;
+
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Z)->value		= nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_Z];
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Z)->minimum	= NUNCHUK_AXES_ABSINFO_MIN;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Z)->maximum	= NUNCHUK_AXES_ABSINFO_MAX;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Z)->fuzz		= NUNCHUK_AXES_ABSINFO_FUZZ;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Z)->flat		= NUNCHUK_AXES_ABSINFO_FLAT;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_Z)->resolution	= NUNCHUK_AXES_ABSINFO_RESOLUTION;
+
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RX)->value			= nunchuk->buf[NUNCHUK_AXES_INDEX_JOYSTICK_X];
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RX)->minimum		= NUNCHUK_AXES_ABSINFO_MIN;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RX)->maximum		= NUNCHUK_AXES_ABSINFO_MAX;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RX)->fuzz			= NUNCHUK_AXES_ABSINFO_FUZZ;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RX)->flat			= NUNCHUK_AXES_ABSINFO_FLAT;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RX)->resolution	= NUNCHUK_AXES_ABSINFO_RESOLUTION;
+
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RY)->value			= nunchuk->buf[NUNCHUK_AXES_INDEX_JOYSTICK_Y];
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RY)->minimum		= NUNCHUK_AXES_ABSINFO_MIN;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RY)->maximum		= NUNCHUK_AXES_ABSINFO_MAX;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RY)->fuzz			= NUNCHUK_AXES_ABSINFO_FUZZ;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RY)->flat			= NUNCHUK_AXES_ABSINFO_FLAT;
+		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_RY)->resolution	= NUNCHUK_AXES_ABSINFO_RESOLUTION;
+
+		set_bit(EV_ABS, input->evbit);
+		set_bit(ABS_X, input->absbit);
+		set_bit(ABS_Y, input->absbit);
+		set_bit(ABS_Z, input->absbit);
+		set_bit(ABS_RX, input->absbit);
+		set_bit(ABS_RY, input->absbit);
+
+		break;
+	}
 
 	status = input_register_polled_device(polled_input);
 	if (status < 0) {
