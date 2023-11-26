@@ -8,6 +8,7 @@
 #define NUNCHUK_MODE_MIN	(1)
 #define NUNCHUK_MODE_MAX	(2)
 
+#define NUNCHUK_I2C_INIT_SIZE    (2)
 #define NUNCHUK_I2C_POLL_SIZE    (6)
 #define NUNCHUK_I2C_BUFFER_SIZE  (NUNCHUK_I2C_POLL_SIZE)
 #define NUNCHUK_POLL_INTERVAL_MS (50)
@@ -55,23 +56,19 @@ struct nunchuk_dev {
 static int nunchuk_i2c_init(struct i2c_client *client)
 {
 	int status = 0;
-	char buf[NUNCHUK_I2C_BUFFER_SIZE] = { 0x0 };
+	const char INIT_COMMAND[2][NUNCHUK_I2C_INIT_SIZE] = {{0xf0, 0x55}, {0xfb, 0x00}};
 
 	do {
 		// init nunchuk
 
-		buf[0] = 0xf0;
-		buf[1] = 0x55;
-		status = i2c_master_send(client, buf, 2);
+		status = i2c_master_send(client, INIT_COMMAND[0], NUNCHUK_I2C_INIT_SIZE);
 		if (status < 0)
 			break;
 		else
 			status = 0;
 		udelay(1000);
 
-		buf[0] = 0xfb;
-		buf[1] = 0x0;
-		status = i2c_master_send(client, buf, 2);
+		status = i2c_master_send(client, INIT_COMMAND[1], NUNCHUK_I2C_INIT_SIZE);
 		if (status < 0)
 			break;
 		else
