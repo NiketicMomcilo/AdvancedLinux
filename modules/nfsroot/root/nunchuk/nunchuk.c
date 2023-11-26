@@ -80,21 +80,36 @@ static int nunchuk_i2c_init(struct i2c_client *client)
 	return status;
 }
 
-static void nunchuk_i2c_get(struct nunchuk_dev *nunchuk)
+static int nunchuk_i2c_get(struct nunchuk_dev *nunchuk)
 {
+	int status = 0;
 	char read_cmd = 0x0;
 
-	(void)i2c_master_send(nunchuk->i2c_client, &read_cmd, 1);
-	mdelay(10);
+	do {
+		status = i2c_master_send(nunchuk->i2c_client, &read_cmd, 1);
+		if (status < 0)
+			break;
+		else
+			status = 0;
+		mdelay(10);
 
-	(void)i2c_master_recv(nunchuk->i2c_client, nunchuk->buf, NUNCHUK_I2C_POLL_SIZE);
-	mdelay(10);
+		status = i2c_master_recv(nunchuk->i2c_client, nunchuk->buf, NUNCHUK_I2C_POLL_SIZE);
+		if (status < 0)
+			break;
+		else
+			status = 0;
+		mdelay(10);
+	} while(0);
 
-	nunchuk->buf[NUNCHUK_AXES_INDEX_JOYSTICK_X] += NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
-	nunchuk->buf[NUNCHUK_AXES_INDEX_JOYSTICK_Y] += NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
-	nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_X] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
-	nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_Y] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
-	nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_Z] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
+	if (status >= 0)
+	{
+		nunchuk->buf[NUNCHUK_AXES_INDEX_JOYSTICK_X] += NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
+		nunchuk->buf[NUNCHUK_AXES_INDEX_JOYSTICK_Y] += NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
+		nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_X] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
+		nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_Y] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
+		nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_Z] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
+	}
+	return status;
 }
 
 static void poll_buttons(struct nunchuk_dev *nunchuk)
@@ -134,7 +149,7 @@ static void nunchuk_poll(struct input_polled_dev *polled_input)
 {
 	struct nunchuk_dev *nunchuk = polled_input->private;
 
-	nunchuk_i2c_get(nunchuk);
+	(void)nunchuk_i2c_get(nunchuk);
 
 	switch(nunchuk->mode) {
 	case 1:
@@ -220,7 +235,7 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 		// Axis events
 		input_alloc_absinfo(input);
 
-		nunchuk_i2c_get(nunchuk);
+		(void)nunchuk_i2c_get(nunchuk);
 
 		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_X)->value		= nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_X];
 		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_X)->minimum	= NUNCHUK_AXES_ABSINFO_MIN;
