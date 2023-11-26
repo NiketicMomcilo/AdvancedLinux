@@ -104,7 +104,7 @@ static int nunchuk_i2c_get(struct nunchuk_dev *nunchuk)
 {
 	int status = 0;
 	char read_cmd = 0x0;
-	char buf[NUNCHUK_I2C_POLL_SIZE];
+	char buf[NUNCHUK_I2C_BUFFER_SIZE];
 
 	do {
 		status = i2c_master_send(nunchuk->i2c_client, &read_cmd, 1);
@@ -230,7 +230,11 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 	input->name = "Wii Nunchuk";
 	input->id.bustype = BUS_I2C;
 
-	(void)nunchuk_i2c_get(nunchuk);
+	status = nunchuk_i2c_get(nunchuk);
+	if (status < 0) {
+		dev_err(&client->dev, "Failed to read Nunchuk inputs.\n");
+		goto fail_i2c_inputs;
+	}
 
 	switch(nunchuk->mode) {
 	default:
@@ -288,8 +292,10 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 
 	return status;
 
-
 fail_input_register:
+	// NOP
+
+fail_i2c_inputs:
 	// NOP
 
 fail_i2c_init:
