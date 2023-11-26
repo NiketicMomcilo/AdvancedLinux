@@ -46,10 +46,20 @@
 #define BIT6	0x00000040
 #define BIT7	0x00000080
 
+struct nunchuk_inputs {
+	int zpressed;
+	int cpressed;
+	s8 joystick_x;
+	s8 joystick_y;
+	s8 acc_x;
+	s8 acc_y;
+	s8 acc_z;
+};
+
 struct nunchuk_dev {
 	struct input_polled_dev *polled_input;
 	struct i2c_client *i2c_client;
-	char buf[NUNCHUK_I2C_BUFFER_SIZE];
+	struct nunchuk_inputs inputs;
 	u32 mode;
 };
 
@@ -84,8 +94,10 @@ static int nunchuk_i2c_get(struct nunchuk_dev *nunchuk)
 {
 	int status = 0;
 	char read_cmd = 0x0;
+	char buf[NUNCHUK_I2C_POLL_SIZE];
 
 	do {
+	// The i2c bus is occupied
 		status = i2c_master_send(nunchuk->i2c_client, &read_cmd, 1);
 		if (status < 0)
 			break;
@@ -93,56 +105,42 @@ static int nunchuk_i2c_get(struct nunchuk_dev *nunchuk)
 			status = 0;
 		mdelay(10);
 
-		status = i2c_master_recv(nunchuk->i2c_client, nunchuk->buf, NUNCHUK_I2C_POLL_SIZE);
+		status = i2c_master_recv(nunchuk->i2c_client, buf, sizeof(buf));
 		if (status < 0)
 			break;
 		else
 			status = 0;
 		mdelay(10);
+	// The i2c bus could potentially be available to other bus devices
 	} while(0);
 
 	if (status >= 0)
 	{
-		nunchuk->buf[NUNCHUK_AXES_INDEX_JOYSTICK_X] += NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
-		nunchuk->buf[NUNCHUK_AXES_INDEX_JOYSTICK_Y] += NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
-		nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_X] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
-		nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_Y] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
-		nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_Z] += NUNCHUK_AXES_INDEX_ACC_OFFSET;
+		nunchuk->inputs.zpressed 	= ((buf[NUNCHUK_AXES_INDEX_BUTTONS] & BIT0) == 0) ? 1 : 0;
+		nunchuk->inputs.cpressed 	= ((buf[NUNCHUK_AXES_INDEX_BUTTONS] & BIT1) == 0) ? 1 : 0;
+		nunchuk->inputs.joystick_x	= buf[NUNCHUK_AXES_INDEX_JOYSTICK_X]	+ NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
+		nunchuk->inputs.joystick_y	= buf[NUNCHUK_AXES_INDEX_JOYSTICK_Y]	+ NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
+		nunchuk->inputs.acc_x		= buf[NUNCHUK_AXES_INDEX_ACC_X]			+ NUNCHUK_AXES_INDEX_ACC_OFFSET;
+		nunchuk->inputs.acc_y		= buf[NUNCHUK_AXES_INDEX_ACC_Y]			+ NUNCHUK_AXES_INDEX_ACC_OFFSET;
+		nunchuk->inputs.acc_z		= buf[NUNCHUK_AXES_INDEX_ACC_Z]			+ NUNCHUK_AXES_INDEX_ACC_OFFSET;
 	}
+
 	return status;
 }
 
 static void poll_buttons(struct nunchuk_dev *nunchuk)
 {
-	int zpressed = 0;
-	int cpressed = 0;
-
-	zpressed = ((nunchuk->buf[NUNCHUK_AXES_INDEX_BUTTONS] & BIT0) == 0) ? 1 : 0;
-	cpressed = ((nunchuk->buf[NUNCHUK_AXES_INDEX_BUTTONS] & BIT1) == 0) ? 1 : 0;
-
-	input_event(nunchuk->polled_input->input, EV_KEY, BTN_Z, zpressed);
-	input_event(nunchuk->polled_input->input, EV_KEY, BTN_C, cpressed);
+	input_event(nunchuk->polled_input->input, EV_KEY, BTN_Z, nunchuk->inputs.zpressed);
+	input_event(nunchuk->polled_input->input, EV_KEY, BTN_C, nunchuk->inputs.cpressed);
 }
 
 static void poll_axes(struct nunchuk_dev *nunchuk)
 {
-	s8 joystick_x = 0;
-	s8 joystick_y = 0;
-	s8 acc_x = 0;
-	s8 acc_y = 0;
-	s8 acc_z = 0;
-
-	joystick_x	= nunchuk->buf[NUNCHUK_AXES_INDEX_JOYSTICK_X];
-	joystick_y	= nunchuk->buf[NUNCHUK_AXES_INDEX_JOYSTICK_Y];
-	acc_x		= nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_X];
-	acc_y		= nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_Y];
-	acc_z		= nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_Z];
-
-	input_event(nunchuk->polled_input->input, EV_ABS, ABS_RX, joystick_x);
-	input_event(nunchuk->polled_input->input, EV_ABS, ABS_RY, joystick_y);
-	input_event(nunchuk->polled_input->input, EV_ABS, ABS_X, acc_x);
-	input_event(nunchuk->polled_input->input, EV_ABS, ABS_Y, acc_y);
-	input_event(nunchuk->polled_input->input, EV_ABS, ABS_Z, acc_z);
+	input_event(nunchuk->polled_input->input, EV_ABS, ABS_RX, nunchuk->inputs.joystick_x);
+	input_event(nunchuk->polled_input->input, EV_ABS, ABS_RY, nunchuk->inputs.joystick_y);
+	input_event(nunchuk->polled_input->input, EV_ABS, ABS_X, nunchuk->inputs.acc_x);
+	input_event(nunchuk->polled_input->input, EV_ABS, ABS_Y, nunchuk->inputs.acc_y);
+	input_event(nunchuk->polled_input->input, EV_ABS, ABS_Z, nunchuk->inputs.acc_z);
 }
 
 static void nunchuk_poll(struct input_polled_dev *polled_input)
@@ -231,23 +229,23 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 
 		p_absinfo = &input->absinfo[NUNCHUK_AXES_ABSINFO_INDEX_ABS_X];
 		*p_absinfo = axes_initial_absinfo;
-		p_absinfo->value = nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_X];
+		p_absinfo->value = nunchuk->inputs.acc_x;
 
 		p_absinfo = &input->absinfo[NUNCHUK_AXES_ABSINFO_INDEX_ABS_Y];
 		*p_absinfo = axes_initial_absinfo;
-		p_absinfo->value = nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_Y];
+		p_absinfo->value = nunchuk->inputs.acc_y;
 
 		p_absinfo = &input->absinfo[NUNCHUK_AXES_ABSINFO_INDEX_ABS_Z];
 		*p_absinfo = axes_initial_absinfo;
-		p_absinfo->value = nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_Z];
+		p_absinfo->value = nunchuk->inputs.acc_z;
 
 		p_absinfo = &input->absinfo[NUNCHUK_AXES_ABSINFO_INDEX_ABS_RX];
 		*p_absinfo = axes_initial_absinfo;
-		p_absinfo->value = nunchuk->buf[NUNCHUK_AXES_INDEX_JOYSTICK_X];
+		p_absinfo->value = nunchuk->inputs.joystick_x;
 
 		p_absinfo = &input->absinfo[NUNCHUK_AXES_ABSINFO_INDEX_ABS_RY];
 		*p_absinfo = axes_initial_absinfo;
-		p_absinfo->value = nunchuk->buf[NUNCHUK_AXES_INDEX_JOYSTICK_Y];
+		p_absinfo->value = nunchuk->inputs.joystick_y;
 
 		set_bit(EV_ABS, input->evbit);
 		set_bit(ABS_X, input->absbit);
