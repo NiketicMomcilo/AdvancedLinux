@@ -152,14 +152,12 @@ static void nunchuk_poll(struct input_polled_dev *polled_input)
 	(void)nunchuk_i2c_get(nunchuk);
 
 	switch(nunchuk->mode) {
+	default:
+	case 2:
+		poll_axes(nunchuk);
+		// deliberate fall through, because case 2 contains case 1 as a subset
 	case 1:
 		poll_buttons(nunchuk);
-		break;
-	case 2:
-	default:
-		poll_buttons(nunchuk);
-		poll_axes(nunchuk);
-		break;
 	}
 
 	input_sync(polled_input->input);
@@ -214,28 +212,13 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 	input->name = "Wii Nunchuk";
 	input->id.bustype = BUS_I2C;
 
+	(void)nunchuk_i2c_get(nunchuk);
+
 	switch(nunchuk->mode) {
-	case 1:
-
-		// Button events
-		set_bit(EV_KEY, input->evbit);
-		set_bit(BTN_C, input->keybit);
-		set_bit(BTN_Z, input->keybit);
-
-		break;
-
-	case 2:
 	default:
-
-		// Button events
-		set_bit(EV_KEY, input->evbit);
-		set_bit(BTN_C, input->keybit);
-		set_bit(BTN_Z, input->keybit);
-
+	case 2:
 		// Axis events
 		input_alloc_absinfo(input);
-
-		(void)nunchuk_i2c_get(nunchuk);
 
 		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_X)->value		= nunchuk->buf[NUNCHUK_AXES_INDEX_ACC_X];
 		(input->absinfo + NUNCHUK_AXES_ABSINFO_INDEX_ABS_X)->minimum	= NUNCHUK_AXES_ABSINFO_MIN;
@@ -279,7 +262,13 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 		set_bit(ABS_RX, input->absbit);
 		set_bit(ABS_RY, input->absbit);
 
-		break;
+		// deliberate fall through, because case 2 contains case 1 as a subset
+	case 1:
+
+		// Button events
+		set_bit(EV_KEY, input->evbit);
+		set_bit(BTN_C, input->keybit);
+		set_bit(BTN_Z, input->keybit);
 	}
 
 	status = input_register_polled_device(polled_input);
