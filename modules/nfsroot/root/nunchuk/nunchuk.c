@@ -28,7 +28,7 @@
 #define NUNCHUK_AXES_ABSINFO_INDEX_ABS_Z		(2)
 #define NUNCHUK_AXES_ABSINFO_INDEX_ABS_RX		(3)
 #define NUNCHUK_AXES_ABSINFO_INDEX_ABS_RY		(4)
-#define NUNCHUK_AXES_ABSINFO_INIT_VALUE			((s8)    0)	// latest reported value for the axis
+#define NUNCHUK_AXES_ABSINFO_VALUE_DEFAULT		((s8)    0)	// latest reported value for the axis
 #define NUNCHUK_AXES_ABSINFO_MIN				((s8) -128) // specifies minimum value for the axis
 #define NUNCHUK_AXES_ABSINFO_MAX				((s8)  127) // specifies maximum value for the axis
 #define NUNCHUK_AXES_ABSINFO_FUZZ				((s8)   10) // specifies fuzz value that is used to filter noise
@@ -45,6 +45,16 @@
 #define BIT5	0x00000020
 #define BIT6	0x00000040
 #define BIT7	0x00000080
+
+static const struct input_absinfo axes_absinfo_default =
+{
+	.value		= NUNCHUK_AXES_ABSINFO_VALUE_DEFAULT,
+	.minimum	= NUNCHUK_AXES_ABSINFO_MIN,
+	.maximum	= NUNCHUK_AXES_ABSINFO_MAX,
+	.fuzz		= NUNCHUK_AXES_ABSINFO_FUZZ,
+	.flat		= NUNCHUK_AXES_ABSINFO_FLAT,
+	.resolution	= NUNCHUK_AXES_ABSINFO_RESOLUTION,
+};
 
 struct nunchuk_inputs {
 	int zpressed;
@@ -97,25 +107,16 @@ static int nunchuk_i2c_get(struct nunchuk_dev *nunchuk)
 	char buf[NUNCHUK_I2C_POLL_SIZE];
 
 	do {
-	// The i2c bus is occupied
 		status = i2c_master_send(nunchuk->i2c_client, &read_cmd, 1);
 		if (status < 0)
 			break;
-		else
-			status = 0;
 		mdelay(10);
 
-		status = i2c_master_recv(nunchuk->i2c_client, buf, sizeof(buf));
+		status = i2c_master_recv(nunchuk->i2c_client, buf, NUNCHUK_I2C_POLL_SIZE);
 		if (status < 0)
 			break;
-		else
-			status = 0;
 		mdelay(10);
-	// The i2c bus could potentially be available to other bus devices
-	} while(0);
 
-	if (status >= 0)
-	{
 		nunchuk->inputs.zpressed 	= ((buf[NUNCHUK_AXES_INDEX_BUTTONS] & BIT0) == 0) ? 1 : 0;
 		nunchuk->inputs.cpressed 	= ((buf[NUNCHUK_AXES_INDEX_BUTTONS] & BIT1) == 0) ? 1 : 0;
 		nunchuk->inputs.joystick_x	= buf[NUNCHUK_AXES_INDEX_JOYSTICK_X]	+ NUNCHUK_AXES_INDEX_JOYSTICK_OFFSET;
@@ -123,7 +124,8 @@ static int nunchuk_i2c_get(struct nunchuk_dev *nunchuk)
 		nunchuk->inputs.acc_x		= buf[NUNCHUK_AXES_INDEX_ACC_X]			+ NUNCHUK_AXES_INDEX_ACC_OFFSET;
 		nunchuk->inputs.acc_y		= buf[NUNCHUK_AXES_INDEX_ACC_Y]			+ NUNCHUK_AXES_INDEX_ACC_OFFSET;
 		nunchuk->inputs.acc_z		= buf[NUNCHUK_AXES_INDEX_ACC_Z]			+ NUNCHUK_AXES_INDEX_ACC_OFFSET;
-	}
+
+	} while(0);
 
 	return status;
 }
@@ -145,20 +147,37 @@ static void poll_axes(struct nunchuk_dev *nunchuk)
 
 static void nunchuk_poll(struct input_polled_dev *polled_input)
 {
+	int status = 0;
 	struct nunchuk_dev *nunchuk = polled_input->private;
 
-	(void)nunchuk_i2c_get(nunchuk);
+	do {
+		status = nunchuk_i2c_get(nunchuk);
 
-	switch(nunchuk->mode) {
-	default:
-	case 2:
-		poll_axes(nunchuk);
-		// deliberate fall through, because case 2 contains case 1 as a subset
-	case 1:
-		poll_buttons(nunchuk);
-	}
+		if (status < 0) {
+			dev_err(&nunchuk->i2c_client->dev, "Unable to poll device.\n");
+			status = nunchuk_i2c_init(nunchuk->i2c_client);
+			break;
+		}
 
-	input_sync(polled_input->input);
+		switch(nunchuk->mode) {
+		default:
+		case 2:
+			poll_axes(nunchuk);
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
+			nop(); // deliberate fall through, because case 2 contains case 1 as a subset
+#pragma GCC diagnostic pop
+
+		case 1:
+			poll_buttons(nunchuk);
+
+			break;
+		}
+
+		input_sync(polled_input->input);
+
+	} while(0);
 }
 
 static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *id_table)
@@ -167,14 +186,6 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 	struct input_polled_dev *polled_input = NULL;
 	struct input_dev *input = NULL;
 	struct nunchuk_dev *nunchuk = NULL;
-	const struct input_absinfo axes_initial_absinfo =
-	{
-		.minimum	= NUNCHUK_AXES_ABSINFO_MIN,
-		.maximum	= NUNCHUK_AXES_ABSINFO_MAX,
-		.fuzz		= NUNCHUK_AXES_ABSINFO_FUZZ,
-		.flat		= NUNCHUK_AXES_ABSINFO_FLAT,
-		.resolution	= NUNCHUK_AXES_ABSINFO_RESOLUTION,
-	};
 	struct input_absinfo *p_absinfo = NULL;
 
 	polled_input = devm_input_allocate_polled_device(&client->dev);
@@ -228,23 +239,23 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 		input_alloc_absinfo(input);
 
 		p_absinfo = &input->absinfo[NUNCHUK_AXES_ABSINFO_INDEX_ABS_X];
-		*p_absinfo = axes_initial_absinfo;
+		*p_absinfo = axes_absinfo_default;
 		p_absinfo->value = nunchuk->inputs.acc_x;
 
 		p_absinfo = &input->absinfo[NUNCHUK_AXES_ABSINFO_INDEX_ABS_Y];
-		*p_absinfo = axes_initial_absinfo;
+		*p_absinfo = axes_absinfo_default;
 		p_absinfo->value = nunchuk->inputs.acc_y;
 
 		p_absinfo = &input->absinfo[NUNCHUK_AXES_ABSINFO_INDEX_ABS_Z];
-		*p_absinfo = axes_initial_absinfo;
+		*p_absinfo = axes_absinfo_default;
 		p_absinfo->value = nunchuk->inputs.acc_z;
 
 		p_absinfo = &input->absinfo[NUNCHUK_AXES_ABSINFO_INDEX_ABS_RX];
-		*p_absinfo = axes_initial_absinfo;
+		*p_absinfo = axes_absinfo_default;
 		p_absinfo->value = nunchuk->inputs.joystick_x;
 
 		p_absinfo = &input->absinfo[NUNCHUK_AXES_ABSINFO_INDEX_ABS_RY];
-		*p_absinfo = axes_initial_absinfo;
+		*p_absinfo = axes_absinfo_default;
 		p_absinfo->value = nunchuk->inputs.joystick_y;
 
 		set_bit(EV_ABS, input->evbit);
@@ -254,13 +265,19 @@ static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *
 		set_bit(ABS_RX, input->absbit);
 		set_bit(ABS_RY, input->absbit);
 
-		// deliberate fall through, because case 2 contains case 1 as a subset
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
+		nop(); // deliberate fall through, because case 2 contains case 1 as a subset
+#pragma GCC diagnostic pop
+
 	case 1:
 
 		// Button events
 		set_bit(EV_KEY, input->evbit);
 		set_bit(BTN_C, input->keybit);
 		set_bit(BTN_Z, input->keybit);
+
+		break;
 	}
 
 	status = input_register_polled_device(polled_input);
